@@ -135,7 +135,10 @@ var BrowserStackBrowser = function(id, emitter, args, logger,
 
         var waitForWorkerRunning = function() {
           client.getWorker(workerId, function(error, w) {
-            if (error) {
+
+            // this is not the way to handle this
+            // TODO: break out handlers in getWorker? That's dependent on the required API wrapper
+            if ( error && !formatError( error ).match(/Rate Limit Exceeded/) ) {
               log.error('Can not get worker %s status %s\n  %s', workerId, browserName, formatError(error));
               return emitter.emit('browser_process_failure', self);
             }
@@ -147,11 +150,18 @@ var BrowserStackBrowser = function(id, emitter, args, logger,
               sessionUrlShowed = true;
             }
 
-            if (w.status === 'running') {
+            if ( w && w.status === 'running' ) {
               whenRunning();
+            // are we in error? is the error due to rate limiting?
+            // TODO: standardize to capture status and message, BS might change their API
+            } else if ( error && formatError( error ).match(/Rate Limit Exceeded/) ) {
+              log.debug('%s : %s is waiting ' + ( bsConfig.rateLimitTimeout / 1000 ).toString() + ' seconds for BS API rate-limiting.', browserName, workerId );
+              // TODO: conduct validation of the bsConfig object before injection here
+              setTimeout( waitForWorkerRunning, bsConfig.rateLimitTimeout );
             } else {
               log.debug('%s job with id %s still in queue.', browserName, workerId);
-              setTimeout(waitForWorkerRunning, 1000);
+              // wait for five seconds, instead of one
+              setTimeout(waitForWorkerRunning, 5000);
             }
           });
         };
@@ -160,7 +170,8 @@ var BrowserStackBrowser = function(id, emitter, args, logger,
           whenRunning();
         } else {
           log.debug('%s job queued with id %s.', browserName, workerId);
-          setTimeout(waitForWorkerRunning, 1000);
+          // wait for 5 seconds
+          setTimeout(waitForWorkerRunning, 5000);
         }
 
       });
